@@ -1,8 +1,5 @@
 matplotlib-inline
-matplotlib
-pandas==2.1.4
-scipy==1.11.4
 seaborn==0.13.1
 streamlit==1.30.0
-aiohttp
+aiohttp==3.11.13
 pydot==2.0.0

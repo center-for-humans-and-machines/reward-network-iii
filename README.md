@@ -35,9 +35,13 @@ The visualizations are stored in the `analysis/plots` directory. The correspondi
 
 ### Statistical Analysis
 
-The statistical analysis is stored in the `statistics` directory.
+The statistical analysis is stored in the `statistics` directory. See also the respective README file therein.
 
 ## Installation
+
+### System Requirements
+
+This software has been tested with `python3.10`. Required packages can be installed using setup.py (see below). Tested package versions are defined in the respective requirements files within the folder `setup/requirements`. Installation typically requires not more than a few minutes.
 
 ### Docker
 
@@ -47,7 +51,7 @@ Network generation, training of the algorithm, and running the backend can be do
 docker compose build all
 ```
 
-### Python
+### Local Environment
 
 For running the descriptive analysis of the results, the following setup is required:
 
@@ -65,10 +69,11 @@ Or us the following command to install all dependencies:
 pip install -e ".[viz,dev,backend,train]"
 ```
 
-## Usage
+## Demo and Usage
 
 ### Training of the Machine Player
 
+We provide example commands for running the training. Depending on the hardware, this process can take several hours to complete.
 See the respective [algorithm README](algorithm/README.md) for more details.
 
 ### Run the experiment
@@ -79,6 +84,15 @@ Start the frontend and backend services using the following command:
 docker compose up frontend backend
 ```
 
+A static verion of the experiment is avaible here: https://center-for-humans-and-machines.github.io/reward-network-iii
+
+
 ### Visualizations of Experimental Data, Agent-Based Model, and Algorithmic Learning Curve
 
+Visualisations are produced in Jupyther Notebooks. These typically run within minutes. 
 See the respective [analysis README](analysis/README.md) for more details.
+
+### Statistics
+
+We use an R script to perform the statistical analyses. Running the script can take more than five hours due to the bootstrapping procedure. To reduce runtime, one might decrease the number of bootstrap samples.
+See the respective [statistics README](statistics/README.md) for more details.
