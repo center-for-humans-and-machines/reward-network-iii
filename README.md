@@ -56,7 +56,7 @@ docker compose build all
 For running the descriptive analysis of the results, the following setup is required:
 
 ```bash
-python3.10 -m venv .venv
+python3.13 -m venv .venv
 . .venv/bin/activate
 pip install --upgrade pip
 pip install wheel
