@@ -24,23 +24,11 @@ def sample_categorical(rng: np.random.Generator, probs: np.ndarray) -> np.ndarra
     return (u > cdf).sum(axis=-1)
 
 
-def compute_rle(bits: np.ndarray, lengths: np.ndarray) -> np.ndarray:
-    """
-    bits: (S, L) with {0,1} and -1 padding after length                              # [S,L]
-    lengths: (S,)                                                                    # [S]
-    returns: RLE complexity (S,)                                                     # [S]
-    """
-    S, L = bits.shape
-    rle = np.zeros(S, dtype=np.int32)
-    for i in range(S):
-        ell = int(lengths[i])
-        if ell == 0:
-            rle[i] = 0
-            continue
-        s = bits[i, :ell]
-        rle[i] = 1 + int(np.sum(s[1:] != s[:-1]))
-    return rle
-
+def compute_rle(value: int) -> int:
+    if value == 0:
+        return 0
+    return (value ^ (value >> 1)).bit_count()
+    
 
 def load_config(file_path: str) -> dict:
     with open(file_path, "r") as f:

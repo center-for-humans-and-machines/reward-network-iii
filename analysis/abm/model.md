@@ -134,7 +134,7 @@ $$
 $$
 where $\mathrm{Perf}_i$ is the total payoff accumulated by agent $i$.
 
-A teacher transmits a subset of its repertoire (e.g., the highest-performing strategies).  
+A teacher transmits its entire repertoire to the learner.  
 Each transmitted strategy $s$ is adopted independently with probability $q(s)$ and added to the learner’s repertoire.
 
 ---

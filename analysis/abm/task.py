@@ -1,6 +1,6 @@
 from __future__ import annotations
 import numpy as np
-from abm.utils import compute_rle
+from abm.utils import compute_rle, sigmoid
 from dataclasses import dataclass
 from typing import Any, Literal, Optional
 from pydantic import BaseModel
@@ -15,6 +15,8 @@ class TaskConfig(BaseModel):
     strategy_distribution: Literal["uniform", "fixed"]
     p_applicable: float
     mode: Literal["sparse"]
+    alpha: float
+    gamma: float
 
 @dataclass
 class TaskEnv:
@@ -32,16 +34,17 @@ class TaskEnv:
     P: int # number of tasks
     S: int # number of strategies
     L: int # maximum strategy length
+    N: int # number of agents
 
     rng: np.random.Generator
 
     task_config: TaskConfig
 
     # latent strategies
-    # s_bits: np.ndarray | None = None   # [S, L] bitstring representation of strategies
     s_idx: np.ndarray | None = None    # [S] index of strategies
     s_len: np.ndarray | None = None    # [S] length of strategies
     s_rle: np.ndarray | None = None    # [S] run-length encoding of strategies
+    s_q: np.ndarray | None = None      # [S] learnability of strategies
 
     # applicability and payoff lookup
     W: np.ndarray | None = None        # [R,P,S] applicability matrix for strategies on tasks
@@ -56,7 +59,7 @@ class TaskEnv:
             assert self.task_config.strategies is not None
             strategies = self.task_config.strategies
         elif self.task_config.strategy_distribution == "uniform":
-            strategies = self.strategies_from_distribution(L=self.L, rng=self.rng, distribution="uniform")
+            strategies = self.strategies_from_distribution()
         else:
             raise ValueError(f"Unknown strategy distribution: {self.task_config.strategy_distribution}")
 
@@ -66,20 +69,28 @@ class TaskEnv:
         self.s_idx = np.full(self.S, -1, dtype=np.int8)
         self.s_len = np.zeros(self.S, dtype=np.int32)
         self.s_rle = np.zeros(self.S, dtype=np.int32)
+        self.s_q = np.zeros(self.S, dtype=float)
         for i, strategy in enumerate(strategies):
-            self.s_idx[i+1] = i
-            self.s_len[i+1] = len(strategy)
-            self.s_rle[i+1] = compute_rle(strategy)
-
+            idx = int(strategy, 2)
+            self.s_idx[i+1] = idx
+            self.s_len[i+1] = idx.bit_length()
+            self.s_rle[i+1] = compute_rle(idx)
+            self.s_q[i+1] = sigmoid(self.task_config.alpha - self.task_config.gamma * self.s_rle[i+1])
         self.build_applicability()
         self.compute_strategy_payoffs()
 
-    def strategies_from_distribution(self) -> list[list[int]]:
+    def strategies_from_distribution(self) -> list[str]:
         """
         Creates a list of strategies from a distribution.
+        Returns list of binary strings (e.g., "101", "1101").
         """
         if self.task_config.strategy_distribution == "uniform":
-            return [self.rng.integers(0, 2, size=l, dtype=np.int8) for l in range(1, self.L + 1)]
+            strategies = []
+            for l in range(1, self.L + 1):
+                bits = self.rng.integers(0, 2, size=l, dtype=np.int8)
+                strategy_str = ''.join(str(bit) for bit in bits)
+                strategies.append(strategy_str)
+            return strategies
         else:
             raise ValueError(f"Unknown distribution: {self.task_config.strategy_distribution}")
 
@@ -123,9 +134,25 @@ class TaskEnv:
         return self.Rps[np.arange(R)[:, None], p_idx, s_idx]                        # [R,N]
 
 
-    def sample_tasks(self, rng: np.random.Generator, N: int) -> np.ndarray:
+    def sample_tasks(self) -> np.ndarray:
         """
         Samples tasks uniformly.
         p_idx: (R,N) int32                                                          # [R,N]
         """
-        return rng.integers(0, self.P, size=(self.R, N), dtype=np.int32)       # [R,N]
+        return self.rng.integers(0, self.P, size=(self.R, self.N), dtype=np.int32)       # [R,N]
+
+
+    def transmit(self, teacher_K: np.ndarray) -> np.ndarray:
+        """
+        Transmits strategies from the teacher to the learner.
+        Args:
+            teacher_K: Strategies from the teacher, shape (R, N, S).
+        Returns:
+            student_K: Strategies learned by the learner, shape (R, N, S).
+        """
+        # create p of shape (R, N, S)
+        p_learn = self.s_q[None, None, :] # [R,N,S]
+        is_success = self.rng.random(size=(self.R, self.N, self.S)) < p_learn # [R,N,S]
+        student_K = np.where(is_success, teacher_K, -np.inf) # [R,N,S]
+        student_K[..., 0] = 0 # safe strategy is always learned
+        return student_K # [R,N,S]
