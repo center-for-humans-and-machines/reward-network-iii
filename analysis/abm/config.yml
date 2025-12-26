@@ -1,0 +1,36 @@
+R: 20
+G: 10
+P: 2
+S: 2
+L: 10
+N: 8
+seed: 123
+agent_config:
+  beta_teacher: 1.0
+  K_transmit: 3
+  agent_types:
+    - human
+    - machine
+  T:
+    - 10
+    - 1000
+  d:
+    - 2
+    - 5
+  eps:
+    - 0.05
+    - 0.05
+  N_0:
+    - 3
+    - 5
+  N_o:
+    - 0
+    - 8
+task_config:
+  strategies:
+    - 111
+  strategy_distribution: fixed
+  r_safe: 0.0
+  c_cost: 1.0
+  r_scale: 1.0
+  lam: 1.0
