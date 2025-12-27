@@ -22,8 +22,9 @@ def run_simulation(R: int, G: int, N: int, P: int, L: int, S: int, seed: int, ag
             agent_pop.update(alive, x_idx, reward)
             alive = agent_pop.is_alive()
 
-        teacher_K, teacher_d = agent_pop.teach()
-        student_K, student_d = task_env.transmit(teacher_K, teacher_d)
+        if g < G - 1:  # Only teach/transmit if not the last generation
+            teacher_K, teacher_d = agent_pop.teach()
+            student_K, student_d = task_env.transmit(teacher_K, teacher_d)
 
         agent_pop.next_generation()
     

@@ -7,7 +7,7 @@ N: 8
 seed: 123
 agent_config:
   beta_teacher: 1.0
-  K_transmit: 3
+  learn_d: true
   agent_types:
     - human
     - machine

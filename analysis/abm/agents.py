@@ -68,11 +68,8 @@ class AgentPop:
             == len(self.agent_config.N_0)
             == len(self.agent_config.N_o)
         )
+        assert int(sum(self.agent_config.N_o)) == self.N == int(sum(self.agent_config.N_0))
         self.X = 2 ** self.L
-        self.N = int(sum(self.agent_config.N_0))
-        assert self.N > 0
-        # usually we keep population size constant across generations
-        assert int(sum(self.agent_config.N_o)) == self.N
         
         # initialize agent type indices for each generation
         AT = np.zeros((self.R, self.G, self.N), dtype=np.int32)
@@ -126,8 +123,18 @@ class AgentPop:
         return x_idx
 
     def exploit(self) -> np.ndarray:
-        """Returns a random known strategy index."""
-        x_idx = self.rng.choice(self.X, p=self.K[:,self.g], size=(self.R, self.N), axis=2, replace=False)
+        """Sample a known strategy index for each (r, n) from K[:, g, n, :]."""
+        K = self.K[:, self.g].astype(float)          # (R, N, X)
+
+        row_sum = K.sum(axis=-1, keepdims=True)      # (R, N, 1)
+        assert np.all(row_sum > 0), "K has all-zero rows in exploit()"
+
+        probs = K / row_sum                          # (R, N, X)
+
+        # Draw one categorical sample per (r,n)
+        one_hot = self.rng.multinomial(1, probs)     # (R, N, X)
+        x_idx = one_hot.argmax(axis=-1)              # (R, N)
+        
         return x_idx
 
     def act(self) -> np.ndarray:
@@ -151,16 +158,15 @@ class AgentPop:
         Updates within-lifetime state for generation g given observed rewards.
 
         - Updates repertoire values K for the chosen strategy.
-        - Updates per-task best strategy b / best_r.
         - Accumulates performance perf.
         """
-        assert self.K is not None and self.perf is not None and self.b is not None and self.best_r is not None
+        assert self.K is not None and self.perf is not None
 
         r_idx = np.arange(self.R)[:, None]
         n_idx = np.arange(self.N)[None, :]
 
-        discovered = reward > 0 & alive
-        self.K[r_idx, self.g, n_idx, x_idx] &= discovered
+        discovered = (reward > 0) & alive
+        self.K[r_idx, self.g, n_idx, x_idx] |= discovered
 
         # performance accumulator
         self.perf[:, self.g, :] += reward * alive
@@ -202,7 +208,7 @@ class AgentPop:
         """
         self.K[:, self.g, :, :] = teacher_K
         self.K[:, self.g, :, 0] = True
-        if self.learn_d:
+        if self.agent_config.learn_d:
             self.d_i[:, self.g, :] = teacher_d
 
 

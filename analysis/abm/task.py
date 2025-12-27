@@ -6,7 +6,7 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel
 
 class TaskConfig(BaseModel):
-    r_safe: float
+    r_safe: float | None = None
     c_cost: float
     r_scale: float
     lam: float
@@ -22,11 +22,6 @@ class TaskConfig(BaseModel):
 class TaskEnv:
     """
     Task family and payoff logic (vectorized over replications and tasks).
-
-    Stored arrays:
-    - Latent strategies: s_bits, s_len, s_rle                                    # [S,L], [S], [S]
-    - Applicability: W[r,p,s]                                                     # [R,P,S]
-    - Strategy payoff lookup: Rps[r,p,s] computed once per run                     # [R,P,S]
     """
 
     # dimensions
@@ -42,16 +37,12 @@ class TaskEnv:
     task_config: TaskConfig
 
     # latent strategies
-    s_idx: np.ndarray | None = None    # [S] index of latent strategies
-    s_len: np.ndarray | None = None    # [S] length of latent strategies
-    s_rle: np.ndarray | None = None    # [S] run-length encoding of latent strategies
-    s_q: np.ndarray | None = None      # [S] learnability of latent strategies
+    x_latent: np.ndarray | None = None    # [S] is latent strategy
+    x_len: np.ndarray | None = None    # [S] length of latent strategies
+    x_q: np.ndarray | None = None      # [S] learnability of latent strategies
 
     # applicability and payoff lookup
     W: np.ndarray | None = None        # [R,P,S] applicability matrix for latent strategies on tasks
-    Rps: np.ndarray | None = None      # [R,P,S] payoff matrix for latent strategies on tasks
-    x_to_s: np.ndarray | None = None  # [S] mapping from strategies to latent strategies
-
 
     
     def __post_init__(self):
@@ -66,29 +57,23 @@ class TaskEnv:
         else:
             raise ValueError(f"Unknown strategy distribution: {self.task_config.strategy_distribution}")
 
-        if '' not in strategies:
-            strategies.append('')
+        if '0' not in strategies:
+            strategies.append('0')
 
         self.X = 2 ** self.L
         assert self.S >= len(strategies)
         assert self.L >= max(len(strategy) for strategy in strategies)
-    
-        self.s_idx = np.full(self.S, -1, dtype=np.int8)
-        self.s_len = np.zeros(self.S, dtype=np.int32)
-        self.s_rle = np.zeros(self.S, dtype=np.int32)
-        self.s_q = np.zeros(self.S, dtype=float)
-
-        self.x_to_s = np.full(self.X, -1, dtype=np.int8)
+        self.s_idx = np.array([int(strategy, 2) for strategy in strategies], dtype=np.int8)
+        self.x_len = np.zeros(self.X, dtype=np.int32)
+        self.x_latent = np.full(self.X, -1, dtype=bool)
+        self.x_q = np.zeros(self.X, dtype=float)
         
-        for i, strategy in enumerate(strategies):
-            idx = int(strategy, 2)
-            self.s_idx[i] = idx
-            # self.s_len[i] = idx.bit_length()
+        for idx in range(self.X):
+            self.x_latent[idx] = idx in self.s_idx
+            self.x_len[idx] = np.log2(idx + 1).astype(np.int32)
             rle = compute_rle(idx)
-            self.s_q[i] = sigmoid(self.task_config.alpha - self.task_config.gamma * rle)
-            self.x_to_s[idx] = i
+            self.x_q[idx] = sigmoid(self.task_config.alpha - self.task_config.gamma * rle)
         self.build_applicability()
-        self.compute_strategy_payoffs()
 
     def strategies_from_distribution(self) -> list[str]:
         """
@@ -109,26 +94,16 @@ class TaskEnv:
         """
         Builds applicability W[r,p,s] ∈ {0,1}. Safe strategy is always applicable.
         """
-        assert self.s_len is not None, "Strategies must be built first."
-
-        self.W = np.zeros((self.R, self.P, self.S), dtype=bool)                                        # [R,P,S]
+        self.W = np.zeros((self.R, self.P, self.X), dtype=bool)                                        # [R,P,S]
         self.W[..., 0] = True # safe strategy is always applicable
 
+        n_applicable = int(self.task_config.p_applicable * self.S)
+
         if self.task_config.mode == "sparse":
-            X = np.argsort(self.rng.random(size=(self.R, self.P, self.S - 1)), axis=-1)  # [R,P,S-1]
-            self.W[..., 1:] = X < self.task_config.p_applicable * (self.S - 1) # [R,P,S-1]
-
-    def compute_strategy_bonus(self) -> np.ndarray:
-        """
-        Precomputes payoff lookup Rps[r,p,s] for applying a *strategy* s on task p.  # [R,P,S]
-        Non-strategy prefixes are handled via nonstrategy_payoff(length).
-        """
-        assert self.W is not None and self.s_len is not None
-
-                                          # [1,1,S]
-        bonus = np.einsum("rps,s->rps", self.W.astype(float), reward_vec)          # [R,P,S]
-        self.Rps = base + bonus                                                         # [R,P,S]
-        self.Rps[..., 0] = self.task_config.r_safe
+            for r in range(self.R):
+                for p in range(self.P):
+                    s_sample = self.rng.choice(self.s_idx[1:], size=n_applicable, replace=False) # exclude safe strategy
+                    self.W[r, p, s_sample] = True
 
 
     def step(self, alive: np.ndarray, x_idx: np.ndarray) -> np.ndarray:
@@ -138,33 +113,18 @@ class TaskEnv:
             p_idx: task indices                                                         # [R,N]
             reward: reward for applying strategies x_idx on the task.                    # [R,N]
         """
-        assert self.Rps is not None
-
-        p_idx = self.sample_tasks()
+        p_idx = self.rng.integers(0, self.P, size=(self.R, self.N), dtype=np.int32)
         
         R = self.R
         x_len = np.log2(x_idx + 1).astype(np.int32)
         cost = self.task_config.c_cost * x_len # [R,N]
-        s_idx = self.x_to_s[x_idx]
-        discovered = s_idx != -1
-        s_idx = np.where(discovered, s_idx, 0) # Hack to handle non-strategies
-
-        bonus = self.Rps[np.arange(R)[:, None], p_idx, s_idx]
-        bonus = np.where(discovered, bonus, 0)
-
-        reward = - cost + bonus
-
+        discovered = self.W[np.arange(R)[:, None], p_idx, x_idx]
+        bonus = self.task_config.r_scale * (self.task_config.lam ** x_len)
+        reward = np.where(discovered, bonus - cost, -cost)
+        if self.task_config.r_safe is not None:
+            reward = np.where(x_idx == 0, self.task_config.r_safe, reward)
         reward = reward * alive
-
         return reward                        # [R,N]
-
-
-    def sample_tasks(self) -> np.ndarray:
-        """
-        Samples tasks uniformly.
-        p_idx: (R,N) int32                                                          # [R,N]
-        """
-        return self.rng.integers(0, self.P, size=(self.R, self.N), dtype=np.int32)       # [R,N]
 
 
     def transmit(self, teacher_K: np.ndarray, teacher_d: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -178,7 +138,7 @@ class TaskEnv:
             student_d: Exploration depths learned by the learner, shape (R, N).
         """
         # create p of shape (R, N, X)
-        p_learn = self.s_q[None, None, :] # [R,N,X]
+        p_learn = self.x_q[None, None, :] # [R,N,X]
         is_success = self.rng.random(size=(self.R, self.N, self.X)) < p_learn # [R,N,X]
         student_K = np.where(is_success, teacher_K, False) # [R,N,X]
         student_K[..., 0] = True # safe strategy is always learned
