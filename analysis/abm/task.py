@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from typing import Any, Literal, Optional
 from pydantic import BaseModel
 
+def compute_bit_length(arr: np.ndarray) -> np.ndarray:
+    """Compute bit length for each element in array. Index 0 has length 0."""
+    # Use vectorize to apply bit_length() to each element
+    bit_length_func = np.vectorize(lambda x: 0 if x == 0 else x.bit_length())
+    return bit_length_func(arr).astype(np.int32)
+
 class TaskConfig(BaseModel):
     r_safe: float | None = None
     c_cost: float
@@ -70,7 +76,7 @@ class TaskEnv:
         
         for idx in range(self.X):
             self.x_latent[idx] = idx in self.s_idx
-            self.x_len[idx] = np.log2(idx + 1).astype(np.int32)
+            self.x_len[idx] = 0 if idx == 0 else idx.bit_length()
             rle = compute_rle(idx)
             self.x_q[idx] = sigmoid(self.task_config.alpha - self.task_config.gamma * rle)
         self.build_applicability()
@@ -116,7 +122,7 @@ class TaskEnv:
         p_idx = self.rng.integers(0, self.P, size=(self.R, self.N), dtype=np.int32)
         
         R = self.R
-        x_len = np.log2(x_idx + 1).astype(np.int32)
+        x_len = compute_bit_length(x_idx)  # [R,N]
         cost = self.task_config.c_cost * x_len # [R,N]
         discovered = self.W[np.arange(R)[:, None], p_idx, x_idx]
         bonus = self.task_config.r_scale * (self.task_config.lam ** x_len)

@@ -28,9 +28,7 @@ class AgentPop:
     - T_i: lifetime trials per agent                                                 # [R,G,N]
     - d_i: exploration depth (max length / breadth of exploration)                    # [R,G,N]
     - eps_i: exploration probability                                                  # [R,G,N]
-    - K: repertoire values (max observed payoff per strategy)                          # [R,G,N,X]
-    - b: best-known strategy index per task                                            # [R,G,N,P]
-    - best_r: best observed payoff per task                                            # [R,G,N,P]
+    - K: repertoire (boolean array indicating which strategies are known)             # [R,G,N,X]
     - perf: performance accumulator (sum of rewards)                                   # [R,G,N]
     """
 
@@ -142,15 +140,17 @@ class AgentPop:
         Returns strategy indices for each agent.
         s_idx: (R,N) int32                                                          # [R,N]
         """
-        go_save = (self.rng.random(size=(self.R, self.N)) < self.eps_i[:, self.g, :])
+        # With probability (1-eps), select safe prefix; otherwise explore/exploit with probability eps
+        go_safe = (self.rng.random(size=(self.R, self.N)) < (1 - self.eps_i[:, self.g, :]))
         go_exploit = (self.rng.random(size=(self.R, self.N)) < self.phi_i[:, self.g, :])
 
         x_idx = np.zeros((self.R, self.N), dtype=np.int32)
         explore_idx = self.explore()
         exploit_idx = self.exploit()
 
-        x_idx = np.where(~go_save & go_exploit, exploit_idx, x_idx)
-        x_idx = np.where(~go_save & ~go_exploit, explore_idx, x_idx)
+        # If not going safe, decide between exploit and explore
+        x_idx = np.where(~go_safe & go_exploit, exploit_idx, x_idx)
+        x_idx = np.where(~go_safe & ~go_exploit, explore_idx, x_idx)
         return x_idx
 
     def update(self, alive: np.ndarray, x_idx: np.ndarray, reward: np.ndarray) -> None:
