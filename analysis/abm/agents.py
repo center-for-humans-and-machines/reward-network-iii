@@ -13,6 +13,8 @@ class AgentConfig(BaseModel):
     T: list[int]
     d: list[int]
     eps: list[float]
+    phi: list[float]
+    learn_d: bool
     N_0: list[int]
     N_o: list[int]
 
@@ -26,7 +28,7 @@ class AgentPop:
     - T_i: lifetime trials per agent                                                 # [R,G,N]
     - d_i: exploration depth (max length / breadth of exploration)                    # [R,G,N]
     - eps_i: exploration probability                                                  # [R,G,N]
-    - K: repertoire values (max observed payoff per strategy)                          # [R,G,N,S]
+    - K: repertoire values (max observed payoff per strategy)                          # [R,G,N,X]
     - b: best-known strategy index per task                                            # [R,G,N,P]
     - best_r: best observed payoff per task                                            # [R,G,N,P]
     - perf: performance accumulator (sum of rewards)                                   # [R,G,N]
@@ -36,10 +38,11 @@ class AgentPop:
     G: int # number of generations
     N: int | None = None # number of agents
     P: int # number of tasks
-    S: int # number of strategies
     L: int # maximum strategy length
+    X: int | None = None # number of all possible strategies
 
     g: int = 0 # current generation index
+    t: int = 0 # current trial index
 
     agent_config: AgentConfig
     rng: np.random.Generator
@@ -47,11 +50,10 @@ class AgentPop:
     T_i: np.ndarray | None = None # [R,G,N] lifetime trials per agent
     d_i: np.ndarray | None = None # [R,G,N] exploration depth (max length for novel prefixes)
     eps_i: np.ndarray | None = None # [R,G,N] exploration probability
+    phi_i: np.ndarray | None = None # [R,G,N] exploration probability
     AT: np.ndarray | None = None # [R,G,N] agent type indices
 
-    K: np.ndarray | None = None # [R,G,N,S] repertoire (known strategies and their payoffs)
-    b: np.ndarray | None = None # [R,G,N,P] best-known strategy per task
-    best_r: np.ndarray | None = None # [R,G,N,P] best-known payoff per task
+    K: np.ndarray | None = None # [R,G,N,X] repertoire (known strategies and their payoffs)
     perf: np.ndarray | None = None # [R,G,N] performance accumulator
 
     #utils
@@ -66,7 +68,7 @@ class AgentPop:
             == len(self.agent_config.N_0)
             == len(self.agent_config.N_o)
         )
-
+        self.X = 2 ** self.L
         self.N = int(sum(self.agent_config.N_0))
         assert self.N > 0
         # usually we keep population size constant across generations
@@ -90,74 +92,61 @@ class AgentPop:
         self.T_i = np.array(self.agent_config.T)[AT]
         self.d_i = np.array(self.agent_config.d)[AT]
         self.eps_i = np.array(self.agent_config.eps)[AT]
-
-        self.K = np.full((self.R, self.G, self.N, self.S), -np.inf, dtype=float)
-        self.K[..., 0] = 0 # safe strategy payoff
-        self.b = np.zeros((self.R, self.G, self.N, self.P), dtype=np.int32)  # default to safe strategy
-        self.best_r = np.full((self.R, self.G, self.N, self.P), -np.inf, dtype=float)
+        self.phi_i = np.array(self.agent_config.phi)[AT]
+        
+        self.K = np.zeros((self.R, self.G, self.N, self.X), dtype=bool)
         self.perf = np.zeros((self.R, self.G, self.N), dtype=float)
         self.pow2 = np.power(2, np.arange(self.L + 1))
 
 
-    def is_alive(self, t: int, g: int) -> np.ndarray:
+    def is_alive(self) -> np.ndarray:
         """
         Returns alive mask for this trial.
         alive: (R,N) bool                                                           # [R,N]
         """
         assert self.T_i is not None
-        return (t < self.T_i[:, g, :])                                   # [R,N]
+        return (self.t < self.T_i[:, self.g, :])                                   # [R,N]
 
-    def do_explore(self) -> np.ndarray:
-        """
-        Samples exploration mode indicators.
-        do_explore: (R,N) bool                                                      # [R,N]
-        """
-        assert self.eps_i is not None
-        do_explore = (self.rng.random(size=(self.R, self.N)) < self.eps_i[:, self.g, :])       # [R,N]
-        return do_explore
 
     def explore(self) -> tuple[np.ndarray, np.ndarray]:
         """
         Samples a candidate strategy index for exploration.
 
         Note: in this vectorized prototype, exploration depth controls the *breadth* of the
-        strategy index range searched: max_idx = min(2^d_i, S).
+        strategy index range searched: max_idx = min(2^d_i, X).
 
         Returns:
             s_idx: (R,N) int32                                                      # [R,N]
-            is_known: (R,N) bool                                                    # [R,N]
         """
         assert self.d_i is not None and self.K is not None and self.pow2 is not None
 
-        max_idx = np.minimum(self.pow2[self.d_i[:, self.g, :]], self.S).astype(np.int32)  # [R,N]
+        max_idx = np.minimum(self.pow2[self.d_i[:, self.g, :]], self.X).astype(np.int32)  # [R,N]
         max_idx = np.maximum(max_idx, 1)  # ensure valid upper bound
-        s_idx = self.rng.integers(0, max_idx, size=(self.R, self.N), dtype=np.int32)      # [R,N]
+        x_idx = self.rng.integers(0, max_idx, size=(self.R, self.N), dtype=np.int32)      # [R,N]
+        return x_idx
 
-        r_idx = np.arange(self.R)[:, None]
-        n_idx = np.arange(self.N)[None, :]
-        is_known = self.K[r_idx, self.g, n_idx, s_idx] > -np.inf                           # [R,N]
-        return s_idx, is_known
+    def exploit(self) -> np.ndarray:
+        """Returns a random known strategy index."""
+        x_idx = self.rng.choice(self.X, p=self.K[:,self.g], size=(self.R, self.N), axis=2, replace=False)
+        return x_idx
 
-    def exploit(self, p_idx: np.ndarray) -> np.ndarray:
-        """Returns current best strategy index for each agent on sampled task."""
-        assert self.b is not None
-        r_idx = np.arange(self.R)[:, None]
-        n_idx = np.arange(self.N)[None, :]
-        return self.b[r_idx, self.g, n_idx, p_idx].astype(np.int32)                        # [R,N]
-
-    def act(self, p_idx: np.ndarray) -> np.ndarray:
+    def act(self) -> np.ndarray:
         """
         Returns strategy indices for each agent.
         s_idx: (R,N) int32                                                          # [R,N]
         """
-        try_explore = self.do_explore()
-        explore_idx, is_known = self.explore()
-        do_exploit = is_known | ~try_explore
-        exploit_idx = self.exploit(p_idx)
-        s_idx = np.where(do_exploit, exploit_idx, explore_idx).astype(np.int32)
-        return s_idx
+        go_save = (self.rng.random(size=(self.R, self.N)) < self.eps_i[:, self.g, :])
+        go_exploit = (self.rng.random(size=(self.R, self.N)) < self.phi_i[:, self.g, :])
 
-    def update(self, p_idx: np.ndarray, s_idx: np.ndarray, reward: np.ndarray) -> None:
+        x_idx = np.zeros((self.R, self.N), dtype=np.int32)
+        explore_idx = self.explore()
+        exploit_idx = self.exploit()
+
+        x_idx = np.where(~go_save & go_exploit, exploit_idx, x_idx)
+        x_idx = np.where(~go_save & ~go_exploit, explore_idx, x_idx)
+        return x_idx
+
+    def update(self, alive: np.ndarray, x_idx: np.ndarray, reward: np.ndarray) -> None:
         """
         Updates within-lifetime state for generation g given observed rewards.
 
@@ -170,20 +159,13 @@ class AgentPop:
         r_idx = np.arange(self.R)[:, None]
         n_idx = np.arange(self.N)[None, :]
 
-        # repertoire update: keep max observed payoff for (agent,strategy)
-        old_k = self.K[r_idx, self.g, n_idx, s_idx]
-        self.K[r_idx, self.g, n_idx, s_idx] = np.maximum(old_k, reward)
+        discovered = reward > 0 & alive
+        self.K[r_idx, self.g, n_idx, x_idx] &= discovered
 
         # performance accumulator
-        self.perf[:, self.g, :] += reward
+        self.perf[:, self.g, :] += reward * alive
 
-        # best-by-task update
-        old_best = self.best_r[r_idx, self.g, n_idx, p_idx]
-        better = reward > old_best
-        self.best_r[r_idx, self.g, n_idx, p_idx] = np.where(better, reward, old_best)
-        old_b = self.b[r_idx, self.g, n_idx, p_idx]
-        self.b[r_idx, self.g, n_idx, p_idx] = np.where(better, s_idx, old_b).astype(np.int32)
-
+        self.t += 1
 
     def select_teacher(self) -> np.ndarray:
         """Selects a teacher for each agent.
@@ -198,37 +180,30 @@ class AgentPop:
         teacher_idx = sample_categorical(self.rng, teach_probs).astype(np.int32)                 # [R,N]
         return teacher_idx
 
-    def export_strategies(self, teacher_idx: np.ndarray) -> np.ndarray:
-        """Export strategies from teachers to learners.
-
-        Args:
-            teacher_idx: Teacher indices, shape (R, N).
-
-        Returns:
-            Strategies, shape (R, N, S).
-        """
-        r_idx = np.arange(self.R)[:, None]
-        teacher_K = self.K[r_idx, self.g, teacher_idx, :]               # [R,N,S]
-        return teacher_K
 
     def teach(self) -> np.ndarray:
         """Transmits strategies from the teacher.
         
         Returns:
-            Strategies, shape (R, N, S).
+            Strategies, shape (R, N, X).
         """
         teacher_idx = self.select_teacher() # [R,N]
-        return self.export_strategies(teacher_idx) # [R,N,S]
+        r_idx = np.arange(self.R)[:, None]
+        teacher_K = self.K[r_idx, self.g, teacher_idx, :]
+        teacher_d = self.d_i[r_idx, self.g, teacher_idx]
+        return teacher_K, teacher_d
 
 
-    def learn(self, teacher_K: np.ndarray) -> None:
+    def learn(self, teacher_K: np.ndarray, teacher_d: np.ndarray) -> None:
         """Learns strategies from the teacher.
 
         Args:
-            teacher_K: Strategies from the teacher, shape (R, N, S).
+            teacher_K: Strategies from the teacher, shape (R, N, X).
         """
         self.K[:, self.g, :, :] = teacher_K
-        self.K[:, self.g, :, 0] = 0
+        self.K[:, self.g, :, 0] = True
+        if self.learn_d:
+            self.d_i[:, self.g, :] = teacher_d
 
 
     def next_generation(self):
@@ -243,13 +218,9 @@ class AgentPop:
         Args:
             path: Path to save the agent population.
         """
-        K_df = array_to_df(self.K, index=["R", "G", "N", "S"], columns=["K"])
-        b_df = array_to_df(self.b, index=["R", "G", "N", "P"], columns=["b"])
-        best_r_df = array_to_df(self.best_r, index=["R", "G", "N", "P"], columns=["best_r"])
+        K_df = array_to_df(self.K, index=["R", "G", "N", "X"], columns=["K"])
         perf_df = array_to_df(self.perf, index=["R", "G", "N"], columns=["perf"])
         
         os.makedirs(path, exist_ok=True)
         K_df.to_parquet(os.path.join(path, "K.parquet"))
-        b_df.to_parquet(os.path.join(path, "b.parquet"))
-        best_r_df.to_parquet(os.path.join(path, "best_r.parquet"))
         perf_df.to_parquet(os.path.join(path, "perf.parquet"))

@@ -14,15 +14,16 @@ def run_simulation(R: int, G: int, N: int, P: int, L: int, S: int, seed: int, ag
     task_env = TaskEnv(R=R, P=P, S=S, L=L, N=N, rng=rng, task_config=task_config_obj)
     for g in range(G):
         if g > 0:
-            agent_pop.learn(student_K)
+            agent_pop.learn(student_K, student_d)
+        alive = agent_pop.is_alive()
+        while alive.any():
+            x_idx = agent_pop.act()
+            reward = task_env.step(alive, x_idx)
+            agent_pop.update(alive, x_idx, reward)
+            alive = agent_pop.is_alive()
 
-        p_idx = task_env.sample_tasks()
-        s_idx = agent_pop.act(p_idx)
-        reward = task_env.step(p_idx, s_idx)
-        agent_pop.update(p_idx, s_idx, reward)
-
-        teacher_K = agent_pop.teach()
-        student_K = task_env.transmit(teacher_K)
+        teacher_K, teacher_d = agent_pop.teach()
+        student_K, student_d = task_env.transmit(teacher_K, teacher_d)
 
         agent_pop.next_generation()
     

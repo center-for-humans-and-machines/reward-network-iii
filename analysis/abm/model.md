@@ -8,10 +8,10 @@ We model cultural exploration as search in a large behavioral space, from which 
 
 Let
 $$
-\mathcal{X} = \bigcup_{\ell=0}^{\ell_{\max}} \{0,1\}^{\ell}
+\mathcal{X} = \{""\} \cup \bigcup_{\ell=1}^{\ell_{\max}} \{1\} \times \{0,1\}^{\ell-1}
 $$
-denote the space of all binary prefixes up to maximum length $\ell_{\max}$.  
-Elements of $\mathcal{X}$ represent concrete action sequences that agents may attempt through exploration. Most elements of $\mathcal{X}$ are unstructured and do not correspond to reusable strategies.
+denote the space of binary prefixes up to maximum length $\ell_{\max}$, where non-empty prefixes must start with 1 and the empty prefix $""$ is included as a special case.  
+Elements of $\mathcal{X}$ represent concrete action sequences that agents may attempt through exploration. The space maps bijectively to integers $0, \ldots, 2^{\ell_{\max}} - 1$ (with $0 \mapsto ""$ and $n > 0$ mapping to the binary representation of $n$). Most elements of $\mathcal{X}$ do not correspond to usable strategies.
 
 ---
 
@@ -21,7 +21,7 @@ There exists a distinguished subset
 $$
 \mathcal{S} \subset \mathcal{X},
 $$
-whose elements are structured prefixes that constitute culturally meaningful strategies. Only elements of $\mathcal{S}$ are retained in memory, socially transmitted, and reused across tasks.
+whose elements are prefixes that constitute culturally meaningful strategies. Only elements of $\mathcal{S}$ are retained in memory, socially transmitted, and reused across tasks.
 
 Strategies are ordered by complexity. For $s \in \mathcal{S}$, let $\ell(s)$ denote its length. The empty prefix
 $$
@@ -72,7 +72,7 @@ This structure ensures that deeper prefixes are increasingly costly to attempt, 
 
 ### Learnability
 
-Each strategy $s \in \mathcal{S}$ has an intrinsic learnability determined by its run-length encoding (RLE) complexity:
+Each strategy $s \in \mathcal{S}$ has an intrinsic learnability determined by its run-length encoding (RLE) complexity. RLE is computed on the bitstring representation of the strategy, ignoring any leading zeros:
 $$
 \mathrm{RLE}(s) =
 \begin{cases}
@@ -100,27 +100,34 @@ For each task $p$, the agent tracks the best-performing strategy discovered so f
 
 ---
 
-### Individual learning dynamics
+### Individual learning dynamics (Option B: unified sampling)
 
-For each trial $t = 1,\dots,T_i$:
+For each trial $t = 1,\dots,T_i$, agent $i$ proceeds as follows:
 
 1. **Task sampling.**  
-   The agent samples a task $p$ uniformly from $\{1,\dots,P\}$.
+   The agent samples a task $p$ uniformly at random from the set $\{1,\dots,P\}$.
 
 2. **Action selection.**  
-   With probability $1-\varepsilon$, the agent exploits the best-known strategy $s_{b_{i,p}}$.  
-   With probability $\varepsilon$, the agent explores by sampling a random prefix
+   The agent samples a prefix $x \in \mathcal{X}$ from a single mixture distribution,
    $$
-   x \sim \mathrm{Unif}\{\,x \in \mathcal{X} : \ell(x) \le d_i\,\}.
+   x \sim (1-\varepsilon)\,\delta_{\emptyset}
+   \;+\;
+   \varepsilon\Big[
+      \phi\,\mathrm{Unif}(\mathcal{K}_i)
+      + (1-\phi)\,\mathrm{Unif}(\mathcal{X}_{\le d_i})
+   \Big],
+   $$
+   where $\emptyset$ denotes the empty (safe) prefix, $\mathcal{K}_i$ is the agent’s current repertoire of discovered strategies, and $\mathcal{X}_{\le d_i}$ is the set of all prefixes of length at most $d_i$.  
+   With probability $1-\varepsilon$, the agent selects the safe prefix. With probability $\varepsilon\phi$, it reuses a previously discovered strategy by sampling uniformly from $\mathcal{K}_i$. With probability $\varepsilon(1-\phi)$, it engages in genuine exploration by sampling uniformly from the combinatorially large space $\mathcal{X}_{\le d_i}$, which assigns exponentially greater probability mass to longer prefixes.
+
+3. **Evaluation and update.**  
+   The sampled prefix $x$ is applied to task $p$ and yields a payoff determined by the task environment. If $x \in \mathcal{S}$, the prefix is added to the agent’s repertoire,
+   $$
+   \mathcal{K}_i \leftarrow \mathcal{K}_i \cup \{x\}.
    $$
 
-3. **Strategy recognition.**  
-   If the sampled prefix $x$ satisfies $x \in \mathcal{S}$ and yields a payoff exceeding the current best for task $p$, it is added to the repertoire:
-   $$
-   \mathcal{K}_i \leftarrow \mathcal{K}_i \cup \{x\}, \qquad b_{i,p} \leftarrow x.
-   $$
+Agents do not maintain task–strategy associations. Instead, strategies are treated as portable cultural objects whose reuse and further dissemination emerge endogenously from the sampling process under a fixed lifetime budget $T_i$.
 
-Through this process, agents test known strategies, occasionally discover new strategies by chance, and reallocate effort across tasks under a single finite budget.
 
 ---
 
