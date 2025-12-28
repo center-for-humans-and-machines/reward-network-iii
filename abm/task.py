@@ -1,15 +1,10 @@
 from __future__ import annotations
 import numpy as np
-from abm.utils import compute_rle, sigmoid
+from utils import compute_rle, sigmoid
 from dataclasses import dataclass
 from typing import Any, Literal, Optional
 from pydantic import BaseModel
 
-def compute_bit_length(arr: np.ndarray) -> np.ndarray:
-    """Compute bit length for each element in array. Index 0 has length 0."""
-    # Use vectorize to apply bit_length() to each element
-    bit_length_func = np.vectorize(lambda x: 0 if x == 0 else x.bit_length())
-    return bit_length_func(arr).astype(np.int32)
 
 class TaskConfig(BaseModel):
     r_safe: float | None = None
@@ -33,18 +28,21 @@ class TaskEnv:
     # dimensions
     R: int # number of replications
     P: int # number of tasks
-    S: int # number of latent strategies
     L: int # maximum strategy length
-    X: int | None = None # number of all possible strategies
     N: int # number of agents
 
     rng: np.random.Generator
 
     task_config: TaskConfig
 
+    X: int | None = None # number of all possible strategies
+    S: int | None = None # number of latent strategies
+
     # latent strategies
     x_latent: np.ndarray | None = None    # [S] is latent strategy
     x_len: np.ndarray | None = None    # [S] length of latent strategies
+    x_cost: np.ndarray | None = None    # [S] cost of latent strategies
+    x_bonus: np.ndarray | None = None    # [S] bonus of latent strategies
     x_q: np.ndarray | None = None      # [S] learnability of latent strategies
 
     # applicability and payoff lookup
@@ -67,7 +65,7 @@ class TaskEnv:
             strategies.append('0')
 
         self.X = 2 ** self.L
-        assert self.S >= len(strategies)
+        self.S = len(strategies)
         assert self.L >= max(len(strategy) for strategy in strategies)
         self.s_idx = np.array([int(strategy, 2) for strategy in strategies], dtype=np.int8)
         self.x_len = np.zeros(self.X, dtype=np.int32)
@@ -79,7 +77,15 @@ class TaskEnv:
             self.x_len[idx] = 0 if idx == 0 else idx.bit_length()
             rle = compute_rle(idx)
             self.x_q[idx] = sigmoid(self.task_config.alpha - self.task_config.gamma * rle)
-        self.build_applicability()
+        self.x_cost = self.task_config.c_cost * self.x_len
+        self.x_bonus = self.task_config.r_scale * (self.task_config.lam ** self.x_len) * self.x_latent
+
+        print(self.x_cost)
+        print(self.x_bonus)
+        print(self.x_latent)
+        print(self.s_idx)
+
+        # self.build_applicability()
 
     def strategies_from_distribution(self) -> list[str]:
         """
@@ -96,20 +102,20 @@ class TaskEnv:
         else:
             raise ValueError(f"Unknown distribution: {self.task_config.strategy_distribution}")
 
-    def build_applicability(self) -> np.ndarray:
-        """
-        Builds applicability W[r,p,s] ∈ {0,1}. Safe strategy is always applicable.
-        """
-        self.W = np.zeros((self.R, self.P, self.X), dtype=bool)                                        # [R,P,S]
-        self.W[..., 0] = True # safe strategy is always applicable
+    # def build_applicability(self) -> np.ndarray:
+    #     """
+    #     Builds applicability W[r,p,s] ∈ {0,1}. Safe strategy is always applicable.
+    #     """
+    #     self.W = np.zeros((self.R, self.P, self.X), dtype=bool)                                        # [R,P,S]
+    #     self.W[..., 0] = True # safe strategy is always applicable
 
-        n_applicable = int(self.task_config.p_applicable * self.S)
+    #     n_applicable = int(self.task_config.p_applicable * self.S)
 
-        if self.task_config.mode == "sparse":
-            for r in range(self.R):
-                for p in range(self.P):
-                    s_sample = self.rng.choice(self.s_idx[1:], size=n_applicable, replace=False) # exclude safe strategy
-                    self.W[r, p, s_sample] = True
+    #     if self.task_config.mode == "sparse":
+    #         for r in range(self.R):
+    #             for p in range(self.P):
+    #                 s_sample = self.rng.choice(self.s_idx[1:], size=n_applicable, replace=False) # exclude safe strategy
+    #                 self.W[r, p, s_sample] = True
 
 
     def step(self, alive: np.ndarray, x_idx: np.ndarray) -> np.ndarray:
@@ -119,13 +125,12 @@ class TaskEnv:
             p_idx: task indices                                                         # [R,N]
             reward: reward for applying strategies x_idx on the task.                    # [R,N]
         """
-        p_idx = self.rng.integers(0, self.P, size=(self.R, self.N), dtype=np.int32)
+        # p_idx = self.rng.integers(0, self.P, size=(self.R, self.N), dtype=np.int32)
         
         R = self.R
-        x_len = compute_bit_length(x_idx)  # [R,N]
-        cost = self.task_config.c_cost * x_len # [R,N]
-        discovered = self.W[np.arange(R)[:, None], p_idx, x_idx]
-        bonus = self.task_config.r_scale * (self.task_config.lam ** x_len)
+        cost = self.x_cost[x_idx] # [R,N]
+        bonus = self.x_bonus[x_idx] # [R,N]
+        discovered = (self.rng.random(size=(self.R, self.N)) < self.task_config.p_applicable)
         reward = np.where(discovered, bonus - cost, -cost)
         if self.task_config.r_safe is not None:
             reward = np.where(x_idx == 0, self.task_config.r_safe, reward)

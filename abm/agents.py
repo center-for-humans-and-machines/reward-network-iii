@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import numpy as np
-from abm.utils import sample_categorical, softmax
-from utils.array_to_df import array_to_df
+from utils import sample_categorical, softmax
+from array_to_df import using_multiindex
 from dataclasses import dataclass
 from pydantic import BaseModel
 import os
@@ -35,16 +35,18 @@ class AgentPop:
 
     R: int # number of replications
     G: int # number of generations
-    N: int | None = None # number of agents
+    N: int # number of agents
     P: int # number of tasks
     L: int # maximum strategy length
-    X: int | None = None # number of all possible strategies
+
+    agent_config: AgentConfig
+    rng: np.random.Generator
 
     g: int = 0 # current generation index
     t: int = 0 # current trial index
 
-    agent_config: AgentConfig
-    rng: np.random.Generator
+    X: int | None = None # number of all possible strategies
+    T_max: int | None = None # maximum lifetime trials
 
     T_i: np.ndarray | None = None # [R,G,N] lifetime trials per agent
     d_i: np.ndarray | None = None # [R,G,N] exploration depth (max length for novel prefixes)
@@ -54,6 +56,9 @@ class AgentPop:
 
     K: np.ndarray | None = None # [R,G,N,X] repertoire (known strategies and their payoffs)
     perf: np.ndarray | None = None # [R,G,N] performance accumulator
+    x: np.ndarray | None = None # [R,G,T_max,N] strategy indices at time t
+    m: np.ndarray | None = None # [R,G,T_max,N] meta strategy indices at time t
+    r: np.ndarray | None = None # [R,G,T_max,N] reward at time t
 
     #utils
     pow2: np.ndarray | None = None # [L+1] 2^l for l<=L
@@ -86,6 +91,7 @@ class AgentPop:
         self.AT = AT
 
         self.T_i = np.array(self.agent_config.T)[AT]
+        self.T_max = np.max(self.T_i)
         self.d_i = np.array(self.agent_config.d)[AT]
         self.eps_i = np.array(self.agent_config.eps)[AT]
         self.phi_i = np.array(self.agent_config.phi)[AT]
@@ -94,6 +100,9 @@ class AgentPop:
         self.perf = np.zeros((self.R, self.G, self.N), dtype=float)
         self.pow2 = np.power(2, np.arange(self.L + 1))
 
+        self.x = np.full((self.R, self.G, self.T_max, self.N), -1, dtype=np.int32)
+        self.m = np.full((self.R, self.G, self.T_max, self.N), -1, dtype=np.int32)
+        self.r = np.full((self.R, self.G, self.T_max, self.N), 0.0, dtype=float)
 
     def is_alive(self) -> np.ndarray:
         """
@@ -126,13 +135,17 @@ class AgentPop:
         K = self.K[:, self.g].astype(float)          # (R, N, X)
 
         row_sum = K.sum(axis=-1, keepdims=True)      # (R, N, 1)
-        assert np.all(row_sum > 0), "K has all-zero rows in exploit()"
+        valid_mask = (row_sum > 0).squeeze(axis=-1)   # (R, N)
 
-        probs = K / row_sum                          # (R, N, X)
+        x_idx = np.full((self.R, self.N), -1, dtype=np.int32)
+        K_valid = K[valid_mask]                   # (M, X) where M is number of valid (r,n) pairs
+        row_sum_valid = row_sum[valid_mask]       # (M, 1)
+        probs = K_valid / row_sum_valid           # (M, X)
 
-        # Draw one categorical sample per (r,n)
-        one_hot = self.rng.multinomial(1, probs)     # (R, N, X)
-        x_idx = one_hot.argmax(axis=-1)              # (R, N)
+        # Draw one categorical sample per valid (r,n)
+        one_hot = self.rng.multinomial(1, probs) # (M, X)
+        x_idx_valid = one_hot.argmax(axis=-1)    # (M,)
+        x_idx[valid_mask] = x_idx_valid
         
         return x_idx
 
@@ -142,16 +155,25 @@ class AgentPop:
         s_idx: (R,N) int32                                                          # [R,N]
         """
         # With probability (1-eps), select safe prefix; otherwise explore/exploit with probability eps
+        m = np.zeros((self.R, self.N), dtype=np.int32)
+        x_idx = np.zeros((self.R, self.N), dtype=np.int32)
+
+        explore_idx = self.explore() # [R,N]
+        exploit_idx = self.exploit() # [R,N]
+
         go_safe = (self.rng.random(size=(self.R, self.N)) < (1 - self.eps_i[:, self.g, :]))
         go_exploit = (self.rng.random(size=(self.R, self.N)) < self.phi_i[:, self.g, :])
+        go_exploit = go_exploit & (exploit_idx != -1) & ~go_safe
+        go_explore = ~go_safe & ~go_exploit
 
-        x_idx = np.zeros((self.R, self.N), dtype=np.int32)
-        explore_idx = self.explore()
-        exploit_idx = self.exploit()
+        m = np.where(go_exploit, 1, m)
+        m = np.where(go_explore, 2, m)
 
-        # If not going safe, decide between exploit and explore
-        x_idx = np.where(~go_safe & go_exploit, exploit_idx, x_idx)
-        x_idx = np.where(~go_safe & ~go_exploit, explore_idx, x_idx)
+        x_idx = np.where(go_exploit, exploit_idx, x_idx)
+        x_idx = np.where(go_explore, explore_idx, x_idx)
+
+        self.x[:, self.g, self.t, :] = x_idx
+        self.m[:, self.g, self.t, :] = m
         return x_idx
 
     def update(self, alive: np.ndarray, x_idx: np.ndarray, reward: np.ndarray) -> None:
@@ -169,8 +191,9 @@ class AgentPop:
         discovered = (reward > 0) & alive
         self.K[r_idx, self.g, n_idx, x_idx] |= discovered
 
-        # performance accumulator
-        self.perf[:, self.g, :] += reward * alive
+        reward = reward * alive
+        self.r[:, self.g, self.t, :] = reward
+        self.perf[:, self.g, :] += reward
 
         self.t += 1
 
@@ -227,6 +250,8 @@ class AgentPop:
         """Advances to the next generation.
         """
         self.g += 1
+        self.t = 0
+        print(f"Generation {self.g} started")
 
 
     def save(self, path: str) -> None:
@@ -235,9 +260,15 @@ class AgentPop:
         Args:
             path: Path to save the agent population.
         """
-        K_df = array_to_df(self.K, index=["R", "G", "N", "X"], columns=["K"])
-        perf_df = array_to_df(self.perf, index=["R", "G", "N"], columns=["perf"])
+        K_df = using_multiindex(self.K, columns=["R", "G", "N", "X"], value_name="K")
+        perf_df = using_multiindex(self.perf, columns=["R", "G", "N"], value_name="perf")
+        x_df = using_multiindex(self.x, columns=["R", "G", "T", "N"], value_name="x")
+        m_df = using_multiindex(self.m, columns=["R", "G", "T", "N"], value_name="m")
+        r_df = using_multiindex(self.r, columns=["R", "G", "T", "N"], value_name="r")
         
         os.makedirs(path, exist_ok=True)
         K_df.to_parquet(os.path.join(path, "K.parquet"))
         perf_df.to_parquet(os.path.join(path, "perf.parquet"))
+        x_df.to_parquet(os.path.join(path, "x.parquet"))
+        m_df.to_parquet(os.path.join(path, "m.parquet"))
+        r_df.to_parquet(os.path.join(path, "r.parquet"))

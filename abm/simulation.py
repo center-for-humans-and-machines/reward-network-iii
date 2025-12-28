@@ -1,18 +1,31 @@
 from __future__ import annotations
 import argparse
 import numpy as np
-from abm.task import TaskEnv, TaskConfig
-from abm.agents import AgentPop, AgentConfig
-from abm.utils import load_config
+from task import TaskEnv, TaskConfig
+from agents import AgentPop, AgentConfig
+from utils import load_config
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-def run_simulation(R: int, G: int, N: int, P: int, L: int, S: int, seed: int, agent_config: dict, task_config: dict):
-    rng = np.random.default_rng(seed)
-    agent_config_obj = AgentConfig(**agent_config)
-    task_config_obj = TaskConfig(**task_config)
-    agent_pop = AgentPop(R=R, G=G, N=N, P=P, S=S, L=L, rng=rng, agent_config=agent_config_obj)
-    task_env = TaskEnv(R=R, P=P, S=S, L=L, N=N, rng=rng, task_config=task_config_obj)
-    for g in range(G):
+class SimulationConfig(BaseModel):
+    """Pydantic model for validating simulation configuration."""
+    R: int = Field(gt=0, description="Number of replications")
+    G: int = Field(gt=0, description="Number of generations")
+    N: int = Field(gt=0, description="Number of agents")
+    P: int = Field(gt=0, description="Number of tasks")
+    L: int = Field(gt=0, description="Maximum strategy length")
+    S: int | None = Field(default=None, gt=0, description="Number of latent strategies (optional, will be computed from strategies if not provided)")
+    seed: int = Field(description="Random seed")
+    agent_config: AgentConfig
+    task_config: TaskConfig
+
+
+
+def run_simulation(c: SimulationConfig):
+    rng = np.random.default_rng(c.seed)
+    agent_pop = AgentPop(R=c.R, G=c.G, N=c.N, P=c.P, L=c.L, rng=rng, agent_config=c.agent_config)
+    task_env = TaskEnv(R=c.R, P=c.P, L=c.L, N=c.N, rng=rng, task_config=c.task_config)
+    for g in range(c.G):
         if g > 0:
             agent_pop.learn(student_K, student_d)
         alive = agent_pop.is_alive()
@@ -22,7 +35,7 @@ def run_simulation(R: int, G: int, N: int, P: int, L: int, S: int, seed: int, ag
             agent_pop.update(alive, x_idx, reward)
             alive = agent_pop.is_alive()
 
-        if g < G - 1:  # Only teach/transmit if not the last generation
+        if g < c.G - 1:  # Only teach/transmit if not the last generation
             teacher_K, teacher_d = agent_pop.teach()
             student_K, student_d = task_env.transmit(teacher_K, teacher_d)
 
@@ -38,5 +51,6 @@ if __name__ == "__main__":
     parser.add_argument("-o", "--output", help="Path to the output directory", required=True)
     args = parser.parse_args()
     config = load_config(args.config)
-    agent_pop = run_simulation(**config)
+    config = SimulationConfig(**config)
+    agent_pop = run_simulation(config)
     agent_pop.save(args.output)

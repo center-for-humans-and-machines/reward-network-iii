@@ -11,7 +11,7 @@ Agent-based model simulating cultural exploration where agents discover, transmi
 ## Running the Model
 
 ```bash
-python simulation.py -c config.yml -o output_directory
+python simulation.py -c example_config.yml -o experiments/example 
 ```
 
 **Arguments:**

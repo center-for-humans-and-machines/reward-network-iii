@@ -1,9 +1,8 @@
-R: 20
-G: 10
+R: 1
+G: 4
 P: 2
-S: 2
-L: 10
-N: 8
+L: 3
+N: 3
 seed: 123
 agent_config:
   beta_teacher: 1.0
@@ -16,25 +15,29 @@ agent_config:
     - 10
     - 1000
   d:
-    - 2
-    - 5
+    - 1
+    - 3
   eps:
-    - 0.0
-    - 0.0
+    - 1.0
+    - 1.0
   phi:
     - 0.5
     - 0.5
   N_0:
     - 3
-    - 5
-  N_o:
     - 0
-    - 8
+  N_o:
+    - 3
+    - 0
 task_config:
   strategies:
-    - 111
+    - "111"
   strategy_distribution: fixed
   r_safe: 0.0
   c_cost: 1.0
   r_scale: 1.0
-  lam: 1.0
+  lam: 3
+  p_applicable: 0.5
+  mode: sparse
+  alpha: 2.0
+  gamma: 1.0
