@@ -33,7 +33,7 @@ task_config:
   strategies:
     - "111"
   strategy_distribution: fixed
-  r_safe: 0.0
+  r_safe: null
   c_cost: 1.0
   r_scale: 1.0
   lam: 3
