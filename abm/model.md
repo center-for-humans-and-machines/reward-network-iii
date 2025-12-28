@@ -94,7 +94,7 @@ where $\sigma(\cdot)$ is the logistic function. Learnability is independent of d
 Each agent $i$ is characterized by:
 - a fixed lifetime trial budget $T_i$;
 - an exploration depth $d_i$, defining the maximum prefix length sampled during exploration;
-- a personal repertoire $K_i : \mathcal{X} \rightarrow \{0, 1\}$, represented as a boolean function over the full behavioral space, initially all zeros. $K_i(x) = 1$ indicates that the agent has discovered and retained strategy $x$. Only strategies in $\mathcal{S}$ that yield positive rewards are retained (see update rule below). [TODO: Clarify, and potentially remove safe strategy] The safe strategy $s_0$ is always available for selection during action selection (see below) but is only added to the repertoire when it yields a positive reward.
+- a personal repertoire $K_i : \mathcal{X} \rightarrow \{0, 1\}$, represented as a boolean function over the full behavioral space, initially all zeros. $K_i(x) = 1$ indicates that the agent has discovered and retained strategy $x$. Only strategies in $\mathcal{S}$ that yield positive rewards are retained (see update rule below). [TODO: Clarify in the future, and potentially remove safe strategy] The safe strategy $s_0$ is always available for selection during action selection (see below) but is only added to the repertoire when it yields a positive reward.
 
 ---
 

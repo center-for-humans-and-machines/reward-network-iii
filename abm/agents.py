@@ -9,6 +9,7 @@ import os
 
 class AgentConfig(BaseModel):
     beta_teacher: float
+    beta_evo: float
     agent_types: list[str]
     T: list[int]
     d: list[int]
@@ -173,30 +174,40 @@ class AgentPop:
 
         self.t += 1
 
-    def select_teacher(self) -> np.ndarray:
-        """Selects a teacher for each agent.
+    def select_by_performance(self, beta: float) -> np.ndarray:
+        """Selects agents based on performance using payoff-biased copying.
+
+        Args:
+            beta: Selection strength parameter.
 
         Returns:
-            Teacher indices, shape (R, N).
+            Selected agent indices, shape (R, N).
         """
         assert self.perf is not None
-        teach_probs = softmax(self.agent_config.beta_teacher * self.perf[:, self.g, :], axis=1)         # [R,N]
+        probs = softmax(beta * self.perf[:, self.g, :], axis=1)         # [R,N]
         # repeat for each agent
-        teach_probs = teach_probs[:, None, :].repeat(self.N, axis=1)                  # [R,N,N]
-        teacher_idx = sample_categorical(self.rng, teach_probs).astype(np.int32)                 # [R,N]
-        return teacher_idx
+        probs = probs[:, None, :].repeat(self.N, axis=1)                  # [R,N,N]
+        selected_idx = sample_categorical(self.rng, probs).astype(np.int32)                 # [R,N]
+        return selected_idx
 
 
     def teach(self) -> np.ndarray:
-        """Transmits strategies from the teacher.
+        """Transmits strategies from the teacher and depth from parent (for cultural evolution).
         
         Returns:
-            Strategies, shape (R, N, X).
+            Strategies and depths, shape (R, N, X) and (R, N).
         """
-        teacher_idx = self.select_teacher() # [R,N]
+        teacher_idx = self.select_by_performance(self.agent_config.beta_teacher) # [R,N]
         r_idx = np.arange(self.R)[:, None]
         teacher_K = self.K[r_idx, self.g, teacher_idx, :]
-        teacher_d = self.d_i[r_idx, self.g, teacher_idx]
+        
+        # For depth inheritance, use separate parent selection if learn_d is True
+        if self.agent_config.learn_d:
+            parent_idx = self.select_by_performance(self.agent_config.beta_evo) # [R,N]
+            teacher_d = self.d_i[r_idx, self.g, parent_idx]
+        else:
+            teacher_d = self.d_i[r_idx, self.g, teacher_idx]
+        
         return teacher_K, teacher_d
 
 
