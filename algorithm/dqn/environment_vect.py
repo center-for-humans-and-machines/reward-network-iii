@@ -174,7 +174,7 @@ class Reward_Network:
             self.idx = torch.randint(0, self.N_NETWORKS, (self.network_batch,)).to(self.device)
 
 
-    def step(self, action):
+    def step(self, action, normalize_reward=True):
         """
         Take a step in all environments given an action for each env;
         here action is given in the form of node index for each env
@@ -210,9 +210,11 @@ class Reward_Network:
             self.big_loss_counter[self.idx], (rewards_idx == 1).int()
         )
 
-        # obtain numerical reward value corresponding to reward indices
-        # rewards = self.reward_map[rewards_idx] (not normalized)
-        rewards = self.reward_norm_map[rewards_idx]  # (normalized)
+        # obtain numerical reward value corresponding to reward 
+        if normalize_reward:
+            rewards = self.reward_norm_map[rewards_idx]  # (normalized)
+        else:
+            rewards = self.reward_map[rewards_idx] # (not normalized)
         # add rewards to reward balance
         self.reward_balance[self.idx] = torch.add(self.reward_balance[self.idx], rewards)
 

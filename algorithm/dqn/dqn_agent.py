@@ -125,8 +125,7 @@ class Agent:
         self.optimizer = th.optim.Adam(self.policy_net.parameters(), lr=self.lr)
         self.scheduler = th.optim.lr_scheduler.StepLR(self.optimizer,
                                                       step_size=config.lr_scheduler_step,
-                                                      gamma=config.lr_scheduler_gamma,
-                                                      verbose=False)
+                                                      gamma=config.lr_scheduler_gamma)
         self.loss_fn = th.nn.SmoothL1Loss(reduction="none")
 
         if save_dir is not None:
