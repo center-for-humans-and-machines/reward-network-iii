@@ -15,6 +15,7 @@ algorithm/wandb
 algorithm/slurm_logs/*.out
 data/dev/
 data/abm/*.parquet
+data/abm_v2/*.parquet
 wandb
 temp/
 
