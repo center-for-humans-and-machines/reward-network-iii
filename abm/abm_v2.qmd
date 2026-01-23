@@ -14,11 +14,11 @@ import seaborn as sns
 from array_to_df import using_multiindex
 
 
-SKIP_SIMULATION = True
-SKIP_HM_SIMULATION = True
-SKIP_HM_N_TEACHER = True
+SKIP_SIMULATION = False 
+SKIP_HM_SIMULATION = False
+SKIP_HM_N_TEACHER = False
 
-R = 10
+R = 50
 
 R_myopic = 1400  # Base reward for myopic solution
 R_optimal = 2200  # Base reward for optimal solution
