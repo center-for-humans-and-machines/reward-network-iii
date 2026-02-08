@@ -5,6 +5,26 @@ library(lme4)
 library(ggplot2)
 library(Rmisc)
 
+# -----------------------------------------------------------------------------
+# Control which analysis sections to run (set to TRUE to run)
+# -----------------------------------------------------------------------------
+run_descriptive_figures <- FALSE   # Descriptive Figures (performance/individual plots)
+run_descriptive_analysis <- FALSE  # Descriptive Analysis (loss strategy means)
+run_performance <- FALSE           # Statistical models on Performance (h1a, h1b, h2a)
+run_alignment <- TRUE              # Statistical models on Alignment (h1a, h1b, h2a)
+run_strategies <- FALSE            # Written strategies (h2b)
+
+# Bootstrap: number of samples (use fewer for quick tests, e.g. 100; use 1000 for final)
+n_boot <- 1000L
+
+# Parallel bootstrap: use multiple cores for confint(..., method = "boot")
+# Set to 1 to disable parallelization
+n_cores_boot <- max(1L, parallel::detectCores() - 1L)
+
+# Output directory for text results (created if missing)
+out_dir <- "statistics/output"
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
 ##########################################
 # Load data
 ##########################################
@@ -49,7 +69,7 @@ player_ratings <- subset(ratings_both, ratings_both$written_strategy_idx == 1)
 ##########################################
 # Descriptive Figures
 ##########################################
-
+if (run_descriptive_figures) {
 #some figures on performance
 ci <- group.CI(solution_total_score ~ condition + generation, data = demo_agg)
 ggplot(data = demo_agg, aes(x = generation, y = solution_total_score, color = condition)) + stat_summary(geom = "point", fun = mean) + geom_pointrange(aes(x = generation, y = solution_total_score.mean, ymin = solution_total_score.lower, ymax = solution_total_score.upper, color = condition), data = ci) + ylim(0,2700) + theme_light()
@@ -65,8 +85,12 @@ ci <- group.CI(solution_total_score ~ condition + generation, data = subset(demo
 ggplot(data = subset(ci, ci$generation == 0), aes(x = condition, y = solution_total_score.mean, color = condition)) + geom_point() + geom_pointrange(aes(x = condition, y = solution_total_score.mean, ymin = solution_total_score.lower, ymax = solution_total_score.upper, color = condition)) + ylim(0,2700) + theme_light()
 #max player score in gen0
 ggplot(data = subset(player, player$generation == 0 & player$ai_player == "False"), aes(x = replication_idx, y = player_score, color = condition)) + stat_summary(geom = "point", fun = max) + ylim(0,2700) + theme_light()
-mean(subset(player$player_score, player$generation == 0 & player$ai_player == "False" & player$condition == "w_ai"))
-mean(subset(player$player_score, player$generation == 0 & player$ai_player == "False" & player$condition == "wo_ai"))
+gen0_mean_w_ai <- mean(subset(player$player_score, player$generation == 0 & player$ai_player == "False" & player$condition == "w_ai"))
+gen0_mean_wo_ai <- mean(subset(player$player_score, player$generation == 0 & player$ai_player == "False" & player$condition == "wo_ai"))
+writeLines(capture.output({
+  cat("Mean player score gen0, w_ai:", gen0_mean_w_ai, "\n")
+  cat("Mean player score gen0, wo_ai:", gen0_mean_wo_ai, "\n")
+}), file.path(out_dir, "01_descriptive_gen0_means.txt"))
 #individual improvement
 individ <- subset(moves, moves$move_idx == 0)
 individ_noAI <- subset(individ, individ$ai_player == "False")
@@ -83,10 +107,12 @@ individ_noAI$gen <- ifelse(individ_noAI$generation > 0, "1-4", "0")
 individ_noAI$trial_id <- ifelse(individ_noAI$trial_type == "demonstration" & individ_noAI$gen == "0", individ_noAI$trial_id + 10, individ_noAI$trial_id)
 individ_noAI$trial_id <- ifelse(individ_noAI$trial_type == "individual" & individ_noAI$gen == "0" & individ_noAI$trial_id > 5, individ_noAI$trial_id * 1.5, individ_noAI$trial_id)
 ggplot(data = individ_noAI, aes(x = trial_id, y = solution_total_score, color = condition, shape = gen)) + stat_summary(geom = "point", fun = mean) + theme_light()
+}
 
 ##########################################
 # Descriptive Analysis
 ##########################################
+if (run_descriptive_analysis) {
 
 # Q: Is the loss strategy present in the written strategies before social learning?
 
@@ -97,7 +123,7 @@ ratings1to4 <- subset(ratings_both, ratings_both$generation > 0)
 ratings1to4$written_strategy_idx <- ifelse(ratings1to4$written_strategy_idx == 2, 1, ratings1to4$written_strategy_idx)
 ci <- group.CI(loss_strategy ~ condition + written_strategy_idx, data = ratings1to4)
 ggplot(data = ratings1to4, aes(x = written_strategy_idx, y = loss_strategy, color = condition)) + stat_summary(geom = "point", fun = mean) + geom_pointrange(aes(x = written_strategy_idx, y = loss_strategy.mean, ymin = loss_strategy.lower, ymax = loss_strategy.upper, color = condition), data = ci) + theme_light()
-unique(ave(ratings1to4$loss_strategy, ratings1to4$condition, ratings1to4$written_strategy_idx))
+loss_strat_1to4 <- unique(ave(ratings1to4$loss_strategy, ratings1to4$condition, ratings1to4$written_strategy_idx))
 
 #include gen0
 ratings_both$written_strategy_idx <- ifelse(ratings_both$written_strategy_idx == 2, 1, ratings_both$written_strategy_idx)
@@ -105,52 +131,58 @@ ratings_both$gen <- ifelse(ratings_both$generation > 0, "1-4", "0")
 ratings_both$genchar <- as.character(ratings_both$generation)
 ggplot(data = ratings_both, aes(x = written_strategy_idx, y = loss_strategy, color = condition, shape = gen)) + stat_summary(geom = "point", fun = mean) + theme_light()
 ratings_gen0 <- subset(ratings_both, ratings_both$generation == 0)
-unique(ave(ratings_gen0$loss_strategy, ratings_gen0$condition, ratings_gen0$written_strategy_idx))
-
+loss_strat_gen0 <- unique(ave(ratings_gen0$loss_strategy, ratings_gen0$condition, ratings_gen0$written_strategy_idx))
+writeLines(capture.output({
+  cat("Loss strategy (ratings gen 1-4 by condition x written_strategy_idx):\n"); print(loss_strat_1to4)
+  cat("\nLoss strategy (ratings gen 0 by condition x written_strategy_idx):\n"); print(loss_strat_gen0)
+}), file.path(out_dir, "02_descriptive_loss_strategy_means.txt"))
+}
 
 ##########################################
 # Statistical Analysis
 ##########################################
 
 #Statistical models on Performance
+if (run_performance) {
 #hyp 1a
 ci <- group.CI(solution_total_score ~ condition + generation, data = demo_gen1plus)
 ggplot(data = demo_gen1plus, aes(x = generation, y = solution_total_score, color = condition)) + stat_summary(geom = "point", fun = mean) + geom_pointrange(aes(x = generation, y = solution_total_score.mean, ymin = solution_total_score.lower, ymax = solution_total_score.upper, color = condition), data = ci) + ylim(0,2700) + theme_light()
 
 demo_gen1plus$generation <- scale(demo_gen1plus$generation)
-model <- lm(solution_total_score ~ condition + generation, data = demo_gen1plus)
-summary(model)
-model <- lmer(solution_total_score ~ condition + generation + (1|session_id), data = demo_gen1plus)
-model <- lmer(solution_total_score ~ condition * generation + (1|session_id) + (generation|branchID), data = demo_gen1plus)
-confint(model, method = "boot", verbose = TRUE)
+model_lm <- lm(solution_total_score ~ condition + generation, data = demo_gen1plus)
+model_lmer1 <- lmer(solution_total_score ~ condition + generation + (1|session_id), data = demo_gen1plus)
+model_lmer2 <- lmer(solution_total_score ~ condition * generation + (1|session_id) + (generation|branchID), data = demo_gen1plus)
+ci_perf_1a <- confint(model_lmer2, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot)
+writeLines(capture.output({ print(summary(model_lm)); print(summary(model_lmer1)); print(summary(model_lmer2)); cat("\nBootstrap CI:\n"); print(ci_perf_1a) }), file.path(out_dir, "03_performance_h1a.txt"))
 
 #hyp1b
 ci2 <- group.CI(solution_total_score ~ condition, data = demo_lastgen)
 ggplot(data = demo_lastgen, aes(x = condition, y = solution_total_score, color = condition)) + stat_summary(geom = "point", fun = mean) + geom_pointrange(aes(x = condition, y = solution_total_score.mean, ymin = solution_total_score.lower, ymax = solution_total_score.upper, color = condition), data = ci2) + ylim(0,3000) + theme_light()
 
-model <- lm(solution_total_score ~ condition, data = demo_lastgen)
-summary(model)
-model <- lmer(solution_total_score ~ condition + (1|session_id), data = demo_lastgen)
-model <- lmer(solution_total_score ~ condition + (1|session_id) + (1|branchID), data = demo_lastgen)
-confint(model, method = "boot", verbose = TRUE)
+model_lm <- lm(solution_total_score ~ condition, data = demo_lastgen)
+model_lmer1 <- lmer(solution_total_score ~ condition + (1|session_id), data = demo_lastgen)
+model_lmer2 <- lmer(solution_total_score ~ condition + (1|session_id) + (1|branchID), data = demo_lastgen)
+ci_perf_1b <- confint(model_lmer2, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot)
+writeLines(capture.output({ print(summary(model_lm)); print(summary(model_lmer1)); print(summary(model_lmer2)); cat("\nBootstrap CI:\n"); print(ci_perf_1b) }), file.path(out_dir, "04_performance_h1b.txt"))
 
 #hyp2a
 ci2 <- group.CI(solution_total_score ~ condition, data = demo_firstgen)
 ggplot(data = demo_firstgen, aes(x = condition, y = solution_total_score, color = condition)) + stat_summary(geom = "point", fun = mean) + geom_pointrange(aes(x = condition, y = solution_total_score.mean, ymin = solution_total_score.lower, ymax = solution_total_score.upper, color = condition), data = ci2) + ylim(0,3000) + theme_light()
 
-model <- lm(solution_total_score ~ condition, data = demo_firstgen)
-summary(model)
-model <- lmer(solution_total_score ~ condition + (1|session_id), data = demo_firstgen)
-model <- lmer(solution_total_score ~ condition + (1|session_id) + (1|branchID), data = demo_firstgen)
-confint(model, method = "boot")
+model_lm <- lm(solution_total_score ~ condition, data = demo_firstgen)
+model_lmer1 <- lmer(solution_total_score ~ condition + (1|session_id), data = demo_firstgen)
+model_lmer2 <- lmer(solution_total_score ~ condition + (1|session_id) + (1|branchID), data = demo_firstgen)
+ci_perf_2a <- confint(model_lmer2, method = "boot", nsim = n_boot, parallel = "multicore", ncpus = n_cores_boot)
 #singular, fit all optimizers
-model.all <- allFit(model)
-summary(model.all)
+model.all <- allFit(model_lmer2)
+writeLines(capture.output({ print(summary(model_lm)); print(summary(model_lmer1)); print(summary(model_lmer2)); cat("\nBootstrap CI:\n"); print(ci_perf_2a); cat("\nallFit (all optimizers):\n"); print(summary(model.all)) }), file.path(out_dir, "05_performance_h2a.txt"))
+}
 
 #stargazer(model, model2, model3, type = "text", column.labels = c("1a", "1b", "2a"), dep.var.caption =  "Prediction", dep.var.labels = "", digits = 1, model.numbers = FALSE, omit.stat = c("ll", "aic", "bic"), omit.table.layout = "n", report = "vcs")
 #stargazer(model, model2, model3, column.labels = c("1a", "1b", "2a"), dep.var.caption =  "Prediction", dep.var.labels = "", digits = 1, model.numbers = FALSE, omit.stat = c("ll", "aic", "bic"), omit.table.layout = "n", report = "vcs")
 
 #Statistical models on alignment
+if (run_alignment) {
 moves$human_machine_match <- ifelse(moves$human_machine_match == "True", 1, 0)
 ci <- group.CI(human_machine_match ~ condition + generation, data = moves)
 ggplot(data = moves, aes(x = generation, y = human_machine_match, color = condition)) + stat_summary(geom = "point", fun = mean) + geom_pointrange(aes(x = generation, y = human_machine_match.mean, ymin = human_machine_match.lower, ymax = human_machine_match.upper, color = condition), data = ci) + ylim(0,1) + theme_light()
@@ -166,31 +198,31 @@ aldemo_firstgen <- subset(aldemo_gen1plus, aldemo_gen1plus$generation == 1)
 
 #hyp 1a
 aldemo_gen1plus$generation <- scale(aldemo_gen1plus$generation)
-model <- glm(human_machine_match ~ condition + generation, data = aldemo_gen1plus, family = binomial(link = "logit"))
-summary(model)
-model <- glmer(human_machine_match ~ condition * generation + (1|session_id) + (generation|branchID), data = aldemo_gen1plus, family = binomial(link = "logit"))
+model_glm <- glm(human_machine_match ~ condition + generation, data = aldemo_gen1plus, family = binomial(link = "logit"))
+model_glmer <- glmer(human_machine_match ~ condition * generation + (1|session_id) + (generation|branchID), data = aldemo_gen1plus, family = binomial(link = "logit"))
 #warning: this is a very large model and 1000 bootstraps will take several hours!
-confint(model, method = "boot", verbose = TRUE)
+ci_align_1a <- confint(model_glmer, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot)
+writeLines(capture.output({ print(summary(model_glm)); print(summary(model_glmer)); cat("\nBootstrap CI:\n"); print(ci_align_1a) }), file.path(out_dir, "06_alignment_h1a.txt"))
 
 #hyp1b
-model <- glm(human_machine_match ~ condition, data = aldemo_lastgen, family = binomial(link = "logit"))
-summary(model)
-model <- glmer(human_machine_match ~ condition + (1|session_id) + (1|branchID), data = aldemo_lastgen, family = binomial(link = "logit"))
-confint(model, method = "boot", verbose = TRUE)
+model_glm <- glm(human_machine_match ~ condition, data = aldemo_lastgen, family = binomial(link = "logit"))
+model_glmer <- glmer(human_machine_match ~ condition + (1|session_id) + (1|branchID), data = aldemo_lastgen, family = binomial(link = "logit"))
+ci_align_1b <- confint(model_glmer, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot)
+writeLines(capture.output({ print(summary(model_glm)); print(summary(model_glmer)); cat("\nBootstrap CI:\n"); print(ci_align_1b) }), file.path(out_dir, "07_alignment_h1b.txt"))
 
 #hyp2a
-model <- glm(human_machine_match ~ condition, data = aldemo_firstgen, family = binomial(link = "logit"))
-summary(model)
-model <- glmer(human_machine_match ~ condition + (1|session_id) + (1|branchID), data = aldemo_firstgen, family = binomial(link = "logit"))
-confint(model, method = "boot", verbose = TRUE)
-
-model.all <- allFit(model)
-summary(model.all)
+model_glm <- glm(human_machine_match ~ condition, data = aldemo_firstgen, family = binomial(link = "logit"))
+model_glmer <- glmer(human_machine_match ~ condition + (1|session_id) + (1|branchID), data = aldemo_firstgen, family = binomial(link = "logit"))
+ci_align_2a <- confint(model_glmer, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot)
+model.all <- allFit(model_glmer)
+writeLines(capture.output({ print(summary(model_glm)); print(summary(model_glmer)); cat("\nBootstrap CI:\n"); print(ci_align_2a); cat("\nallFit (all optimizers):\n"); print(summary(model.all)) }), file.path(out_dir, "08_alignment_h2a.txt"))
+}
 
 #stargazer(model, model2, model3, type = "text", column.labels = c("1a", "1b", "2a"), dep.var.caption =  "Prediction", dep.var.labels = "", digits = 3, model.numbers = FALSE, omit.stat = c("ll", "aic", "bic"), omit.table.layout = "n", report = "vcs")
 #stargazer(model, model2, model3, column.labels = c("1a", "1b", "2a"), dep.var.caption =  "Prediction", dep.var.labels = "", digits = 3, model.numbers = FALSE, omit.stat = c("ll", "aic", "bic"), omit.table.layout = "n", report = "vcs")
 
 #written strategies
+if (run_strategies) {
 
 #hyp2b
 player_ratings$branchID <- paste0(player_ratings$replication_idx, player_ratings$condition)
@@ -202,12 +234,12 @@ runaverages <- aggregate(player_ratings, by = list(player_ratings$generation, pl
 ggplot(data = player_ratings, aes(x = generation, y = loss_strategy, color = condition)) + geom_point(aes(x = Group.1, y = loss_strategy, color = Group.3, group = Group.3), data = runaverages, size = 1.2, position= position_dodge(width = 0.4), alpha = 0.5) + stat_summary(aes(group = condition), geom = "point", fun = mean, size = 4, shape = 18, position = position_dodge(width = 0.4)) + coord_cartesian(ylim = c(0,1)) + xlab("Generation") + ylab("Loss Strategy") + scale_color_manual(values=c("orange", "blue"), labels=c("AI Tree", "Human Tree")) + theme_light() + theme(axis.text = element_text(size=12), axis.title = element_text(size = 14))
 
 ratings_gen1plus$generation <- scale(ratings_gen1plus$generation)
-model <- glm(loss_strategy ~ condition + generation, data = ratings_gen1plus, family = binomial(link = "logit"))
-summary(model)
-model <- glmer(loss_strategy ~ condition * generation + (generation|branchID), data = ratings_gen1plus, family = binomial(link = "logit"))
-confint(model, method = "boot", verbose = TRUE)
-model.all <- allFit(model)
-summary(model.all)
+model_glm <- glm(loss_strategy ~ condition + generation, data = ratings_gen1plus, family = binomial(link = "logit"))
+model_glmer <- glmer(loss_strategy ~ condition * generation + (generation|branchID), data = ratings_gen1plus, family = binomial(link = "logit"))
+ci_strat_2b <- confint(model_glmer, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot)
+model.all <- allFit(model_glmer)
+writeLines(capture.output({ print(summary(model_glm)); print(summary(model_glmer)); cat("\nBootstrap CI:\n"); print(ci_strat_2b); cat("\nallFit (all optimizers):\n"); print(summary(model.all)) }), file.path(out_dir, "09_strategies_h2b.txt"))
+}
 
 #stargazer(model, type = "text", column.labels = "2b", dep.var.caption =  "Prediction", dep.var.labels = "", digits = 3, model.numbers = FALSE, omit.stat = c("ll", "aic", "bic"), omit.table.layout = "n", report = "vcs")
 #stargazer(model, column.labels = "2b", dep.var.caption =  "Prediction", dep.var.labels = "", digits = 3, model.numbers = FALSE, omit.stat = c("ll", "aic", "bic"), omit.table.layout = "n", report = "vcs")
