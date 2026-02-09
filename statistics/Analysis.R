@@ -13,16 +13,24 @@ run_descriptive_analysis <- FALSE  # Descriptive Analysis (loss strategy means)
 run_performance <- FALSE           # Statistical models on Performance (h1a, h1b, h2a)
 run_alignment <- TRUE              # Statistical models on Alignment (h1a, h1b, h2a)
 run_strategies <- FALSE            # Written strategies (h2b)
+use_random_categorical_generation <- FALSE  # If TRUE: use alternative specs for 1a and 2b (generation as categorical random effect)
 
-# Bootstrap: number of samples (use fewer for quick tests, e.g. 100; use 1000 for final)
+# Bootstrap: set to FALSE to skip bootstrap CIs (faster run for testing)
+run_bootstrap <- TRUE
+# Number of bootstrap samples when run_bootstrap is TRUE (e.g. 100 for quick test, 1000 for final)
 n_boot <- 1000L
 
 # Parallel bootstrap: use multiple cores for confint(..., method = "boot")
 # Set to 1 to disable parallelization
 n_cores_boot <- max(1L, parallel::detectCores() - 1L)
 
-# Output directory for text results (created if missing)
-out_dir <- "statistics/output"
+# Output directory for text results (one subfolder per run with timestamp and optional name)
+base_out_dir <- "statistics/output"
+run_timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+# Optional short label for this run (no spaces recommended); set "" to omit
+run_name <- "alignment_fixed_generation"
+run_id <- if (nzchar(run_name)) paste(run_timestamp, run_name, sep = "_") else run_timestamp
+out_dir <- file.path(base_out_dir, run_id)
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
 ##########################################
@@ -152,8 +160,8 @@ demo_gen1plus$generation <- scale(demo_gen1plus$generation)
 model_lm <- lm(solution_total_score ~ condition + generation, data = demo_gen1plus)
 model_lmer1 <- lmer(solution_total_score ~ condition + generation + (1|session_id), data = demo_gen1plus)
 model_lmer2 <- lmer(solution_total_score ~ condition * generation + (1|session_id) + (generation|branchID), data = demo_gen1plus)
-ci_perf_1a <- confint(model_lmer2, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot)
-writeLines(capture.output({ print(summary(model_lm)); print(summary(model_lmer1)); print(summary(model_lmer2)); cat("\nBootstrap CI:\n"); print(ci_perf_1a) }), file.path(out_dir, "03_performance_h1a.txt"))
+if (run_bootstrap) { ci_perf_1a <- confint(model_lmer2, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot) } else { ci_perf_1a <- NULL }
+writeLines(capture.output({ print(summary(model_lm)); print(summary(model_lmer1)); print(summary(model_lmer2)); cat("\nBootstrap CI:\n"); if (run_bootstrap) print(ci_perf_1a) else cat("(skipped)\n") }), file.path(out_dir, "03_performance_h1a.txt"))
 
 #hyp1b
 ci2 <- group.CI(solution_total_score ~ condition, data = demo_lastgen)
@@ -162,8 +170,8 @@ ggplot(data = demo_lastgen, aes(x = condition, y = solution_total_score, color =
 model_lm <- lm(solution_total_score ~ condition, data = demo_lastgen)
 model_lmer1 <- lmer(solution_total_score ~ condition + (1|session_id), data = demo_lastgen)
 model_lmer2 <- lmer(solution_total_score ~ condition + (1|session_id) + (1|branchID), data = demo_lastgen)
-ci_perf_1b <- confint(model_lmer2, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot)
-writeLines(capture.output({ print(summary(model_lm)); print(summary(model_lmer1)); print(summary(model_lmer2)); cat("\nBootstrap CI:\n"); print(ci_perf_1b) }), file.path(out_dir, "04_performance_h1b.txt"))
+if (run_bootstrap) { ci_perf_1b <- confint(model_lmer2, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot) } else { ci_perf_1b <- NULL }
+writeLines(capture.output({ print(summary(model_lm)); print(summary(model_lmer1)); print(summary(model_lmer2)); cat("\nBootstrap CI:\n"); if (run_bootstrap) print(ci_perf_1b) else cat("(skipped)\n") }), file.path(out_dir, "04_performance_h1b.txt"))
 
 #hyp2a
 ci2 <- group.CI(solution_total_score ~ condition, data = demo_firstgen)
@@ -172,10 +180,10 @@ ggplot(data = demo_firstgen, aes(x = condition, y = solution_total_score, color 
 model_lm <- lm(solution_total_score ~ condition, data = demo_firstgen)
 model_lmer1 <- lmer(solution_total_score ~ condition + (1|session_id), data = demo_firstgen)
 model_lmer2 <- lmer(solution_total_score ~ condition + (1|session_id) + (1|branchID), data = demo_firstgen)
-ci_perf_2a <- confint(model_lmer2, method = "boot", nsim = n_boot, parallel = "multicore", ncpus = n_cores_boot)
+if (run_bootstrap) { ci_perf_2a <- confint(model_lmer2, method = "boot", nsim = n_boot, parallel = "multicore", ncpus = n_cores_boot) } else { ci_perf_2a <- NULL }
 #singular, fit all optimizers
 model.all <- allFit(model_lmer2)
-writeLines(capture.output({ print(summary(model_lm)); print(summary(model_lmer1)); print(summary(model_lmer2)); cat("\nBootstrap CI:\n"); print(ci_perf_2a); cat("\nallFit (all optimizers):\n"); print(summary(model.all)) }), file.path(out_dir, "05_performance_h2a.txt"))
+writeLines(capture.output({ print(summary(model_lm)); print(summary(model_lmer1)); print(summary(model_lmer2)); cat("\nBootstrap CI:\n"); if (run_bootstrap) print(ci_perf_2a) else cat("(skipped)\n"); cat("\nallFit (all optimizers):\n"); print(summary(model.all)) }), file.path(out_dir, "05_performance_h2a.txt"))
 }
 
 #stargazer(model, model2, model3, type = "text", column.labels = c("1a", "1b", "2a"), dep.var.caption =  "Prediction", dep.var.labels = "", digits = 1, model.numbers = FALSE, omit.stat = c("ll", "aic", "bic"), omit.table.layout = "n", report = "vcs")
@@ -197,25 +205,31 @@ aldemo_lastgen <- subset(aldemo_gen1plus, aldemo_gen1plus$generation == 4)
 aldemo_firstgen <- subset(aldemo_gen1plus, aldemo_gen1plus$generation == 1)
 
 #hyp 1a
-aldemo_gen1plus$generation <- scale(aldemo_gen1plus$generation)
-model_glm <- glm(human_machine_match ~ condition + generation, data = aldemo_gen1plus, family = binomial(link = "logit"))
-model_glmer <- glmer(human_machine_match ~ condition * generation + (1|session_id) + (generation|branchID), data = aldemo_gen1plus, family = binomial(link = "logit"))
+if (use_random_categorical_generation) {
+  # Alternative specification: generation as categorical (fixed in glm, random in glmer)
+  model_glm <- glm(human_machine_match ~ condition + factor(generation), data = aldemo_gen1plus, family = binomial(link = "logit"))
+  model_glmer <- glmer(human_machine_match ~ condition + (1|session_id) + (1|generation) + (1|branchID), data = aldemo_gen1plus, family = binomial(link = "logit"))
+} else {
+  aldemo_gen1plus$generation <- scale(aldemo_gen1plus$generation)
+  model_glm <- glm(human_machine_match ~ condition + generation, data = aldemo_gen1plus, family = binomial(link = "logit"))
+  model_glmer <- glmer(human_machine_match ~ condition * generation + (1|session_id) + (generation|branchID), data = aldemo_gen1plus, family = binomial(link = "logit"))
+}
 #warning: this is a very large model and 1000 bootstraps will take several hours!
-ci_align_1a <- confint(model_glmer, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot)
-writeLines(capture.output({ print(summary(model_glm)); print(summary(model_glmer)); cat("\nBootstrap CI:\n"); print(ci_align_1a) }), file.path(out_dir, "06_alignment_h1a.txt"))
+if (run_bootstrap) { ci_align_1a <- confint(model_glmer, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot) } else { ci_align_1a <- NULL }
+writeLines(capture.output({ print(summary(model_glm)); print(summary(model_glmer)); cat("\nBootstrap CI:\n"); if (run_bootstrap) print(ci_align_1a) else cat("(skipped)\n") }), file.path(out_dir, "06_alignment_h1a.txt"))
 
 #hyp1b
 model_glm <- glm(human_machine_match ~ condition, data = aldemo_lastgen, family = binomial(link = "logit"))
 model_glmer <- glmer(human_machine_match ~ condition + (1|session_id) + (1|branchID), data = aldemo_lastgen, family = binomial(link = "logit"))
-ci_align_1b <- confint(model_glmer, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot)
-writeLines(capture.output({ print(summary(model_glm)); print(summary(model_glmer)); cat("\nBootstrap CI:\n"); print(ci_align_1b) }), file.path(out_dir, "07_alignment_h1b.txt"))
+if (run_bootstrap) { ci_align_1b <- confint(model_glmer, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot) } else { ci_align_1b <- NULL }
+writeLines(capture.output({ print(summary(model_glm)); print(summary(model_glmer)); cat("\nBootstrap CI:\n"); if (run_bootstrap) print(ci_align_1b) else cat("(skipped)\n") }), file.path(out_dir, "07_alignment_h1b.txt"))
 
 #hyp2a
 model_glm <- glm(human_machine_match ~ condition, data = aldemo_firstgen, family = binomial(link = "logit"))
 model_glmer <- glmer(human_machine_match ~ condition + (1|session_id) + (1|branchID), data = aldemo_firstgen, family = binomial(link = "logit"))
-ci_align_2a <- confint(model_glmer, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot)
+if (run_bootstrap) { ci_align_2a <- confint(model_glmer, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot) } else { ci_align_2a <- NULL }
 model.all <- allFit(model_glmer)
-writeLines(capture.output({ print(summary(model_glm)); print(summary(model_glmer)); cat("\nBootstrap CI:\n"); print(ci_align_2a); cat("\nallFit (all optimizers):\n"); print(summary(model.all)) }), file.path(out_dir, "08_alignment_h2a.txt"))
+writeLines(capture.output({ print(summary(model_glm)); print(summary(model_glmer)); cat("\nBootstrap CI:\n"); if (run_bootstrap) print(ci_align_2a) else cat("(skipped)\n"); cat("\nallFit (all optimizers):\n"); print(summary(model.all)) }), file.path(out_dir, "08_alignment_h2a.txt"))
 }
 
 #stargazer(model, model2, model3, type = "text", column.labels = c("1a", "1b", "2a"), dep.var.caption =  "Prediction", dep.var.labels = "", digits = 3, model.numbers = FALSE, omit.stat = c("ll", "aic", "bic"), omit.table.layout = "n", report = "vcs")
@@ -233,12 +247,18 @@ ggplot(data = player_ratings, aes(x = generation, y = loss_strategy, color = con
 runaverages <- aggregate(player_ratings, by = list(player_ratings$generation, player_ratings$replication_idx, player_ratings$condition), FUN = mean)
 ggplot(data = player_ratings, aes(x = generation, y = loss_strategy, color = condition)) + geom_point(aes(x = Group.1, y = loss_strategy, color = Group.3, group = Group.3), data = runaverages, size = 1.2, position= position_dodge(width = 0.4), alpha = 0.5) + stat_summary(aes(group = condition), geom = "point", fun = mean, size = 4, shape = 18, position = position_dodge(width = 0.4)) + coord_cartesian(ylim = c(0,1)) + xlab("Generation") + ylab("Loss Strategy") + scale_color_manual(values=c("orange", "blue"), labels=c("AI Tree", "Human Tree")) + theme_light() + theme(axis.text = element_text(size=12), axis.title = element_text(size = 14))
 
-ratings_gen1plus$generation <- scale(ratings_gen1plus$generation)
-model_glm <- glm(loss_strategy ~ condition + generation, data = ratings_gen1plus, family = binomial(link = "logit"))
-model_glmer <- glmer(loss_strategy ~ condition * generation + (generation|branchID), data = ratings_gen1plus, family = binomial(link = "logit"))
-ci_strat_2b <- confint(model_glmer, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot)
+if (use_random_categorical_generation) {
+  # Alternative specification: generation as categorical (fixed in glm, random in glmer)
+  model_glm <- glm(loss_strategy ~ condition + factor(generation), data = ratings_gen1plus, family = binomial(link = "logit"))
+  model_glmer <- glmer(loss_strategy ~ condition + (1|generation) + (1|branchID), data = ratings_gen1plus, family = binomial(link = "logit"))
+} else {
+  ratings_gen1plus$generation <- scale(ratings_gen1plus$generation)
+  model_glm <- glm(loss_strategy ~ condition + generation, data = ratings_gen1plus, family = binomial(link = "logit"))
+  model_glmer <- glmer(loss_strategy ~ condition * generation + (generation|branchID), data = ratings_gen1plus, family = binomial(link = "logit"))
+}
+if (run_bootstrap) { ci_strat_2b <- confint(model_glmer, method = "boot", nsim = n_boot, verbose = TRUE, parallel = "multicore", ncpus = n_cores_boot) } else { ci_strat_2b <- NULL }
 model.all <- allFit(model_glmer)
-writeLines(capture.output({ print(summary(model_glm)); print(summary(model_glmer)); cat("\nBootstrap CI:\n"); print(ci_strat_2b); cat("\nallFit (all optimizers):\n"); print(summary(model.all)) }), file.path(out_dir, "09_strategies_h2b.txt"))
+writeLines(capture.output({ print(summary(model_glm)); print(summary(model_glmer)); cat("\nBootstrap CI:\n"); if (run_bootstrap) print(ci_strat_2b) else cat("(skipped)\n"); cat("\nallFit (all optimizers):\n"); print(summary(model.all)) }), file.path(out_dir, "09_strategies_h2b.txt"))
 }
 
 #stargazer(model, type = "text", column.labels = "2b", dep.var.caption =  "Prediction", dep.var.labels = "", digits = 3, model.numbers = FALSE, omit.stat = c("ll", "aic", "bic"), omit.table.layout = "n", report = "vcs")

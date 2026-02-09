@@ -25,3 +25,6 @@ venv
 .vscode
 .Rproj.user
 .osfcli.config
+
+statistics/output
+data/abm_v2
