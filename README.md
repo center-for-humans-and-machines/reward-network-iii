@@ -87,12 +87,17 @@ docker compose up frontend backend
 A static verion of the experiment is avaible here: https://center-for-humans-and-machines.github.io/reward-network-iii
 
 
-### Visualizations of Experimental Data, Agent-Based Model, and Algorithmic Learning Curve
+### Visualizations of Experimental Data, and Algorithmic Learning Curve
 
 Visualisations are produced in Jupyther Notebooks. These typically run within minutes. 
 See the respective [analysis README](analysis/README.md) for more details.
 
+### Agent-Based Model
+
+The agent based model is defined in a Jupyther Notebook. These typically run within minutes.
+See the respective [abm README](abm/README.md) for more details.
+
 ### Statistics
 
-We use an R script to perform the statistical analyses. Running the script can take more than five hours due to the bootstrapping procedure. To reduce runtime, one might decrease the number of bootstrap samples.
+We use an R script to perform the statistical analyses. Running the script can take more than five hours due to the bootstrapping procedure. To reduce runtime, one might decrease the number of bootstrap samples or deactivate the boostrapping all together.
 See the respective [statistics README](statistics/README.md) for more details.
