@@ -21,17 +21,7 @@ This will generate the following figures:
 * Figure 3: Four prototypical populations [figure 3](plots/experiment/network_compressed_player_score.pdf)
 * Figure 4: Evolution of Task Performance, Machine Alignment, and Strategy Descrip-
 tion [figure 4](plots/experiment/metrics_overview.pdf)
-* Supplementary Figure 8 [sup fig](plots/experiment/network_player_score.pdf)
-* Supplementary Figure 9 [sup fig](plots/experiment/network_machine_alignment.pdf)
-* Supplementary Figure 10 [sup fig](plots/experiment/network_loss_strategy_int.pdf)
-
-## Agent-Based Model
-
-To run the agent-based model, run the following notebook: [abm.ipynbb](abm.ipynb)
-
-This notebook will run the agent-based model and generate the following figures:
-* Figure 5: Agent-Based Model - Boundaries and Uplift [figure 5](plots/abm/heatmap.pdf)
-* Supplementary Figure 7 [sup fig](plots/abm/heatmap_details.png)
+* Supplementary Figure 8, 9, 10, 11
 
 ## Algorithmic Learning Curve
 

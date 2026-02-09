@@ -16,7 +16,7 @@ run_strategies <- FALSE            # Written strategies (h2b)
 use_random_categorical_generation <- FALSE  # If TRUE: use alternative specs for 1a and 2b (generation as categorical random effect)
 
 # Bootstrap: set to FALSE to skip bootstrap CIs (faster run for testing)
-run_bootstrap <- TRUE
+run_bootstrap <- FALSE
 # Number of bootstrap samples when run_bootstrap is TRUE (e.g. 100 for quick test, 1000 for final)
 n_boot <- 1000L
 
